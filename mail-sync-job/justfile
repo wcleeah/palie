@@ -1,0 +1,4 @@
+set dotenv-load
+
+sync:
+    go run cmd/sync/main.go 
