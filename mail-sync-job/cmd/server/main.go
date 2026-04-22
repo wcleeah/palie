@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -96,9 +97,9 @@ func main() {
 
 		ga, err := gmailx.InitGmailData(req.Context(), gmailx.InitGmailDataOptions{
 			GmailStorage: pgQueries,
-			Token: token,
-			Me: me,
-			Salt: accessKeySalt,
+			Token:        token,
+			Me:           me,
+			Salt:         accessKeySalt,
 		})
 		if err != nil {
 			println(err.Error())
@@ -107,7 +108,7 @@ func main() {
 			return
 		}
 
-		rw.Write(ga.ID.Bytes[:])
+		rw.Write([]byte(fmt.Sprintf("%s: success", ga.DisplayName)))
 		rw.WriteHeader(200)
 	})
 

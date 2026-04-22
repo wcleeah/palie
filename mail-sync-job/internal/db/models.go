@@ -9,7 +9,7 @@ import (
 )
 
 type GmailBackfillJob struct {
-	ID               int64
+	ID               pgtype.UUID
 	Status           string
 	AccountID        pgtype.UUID
 	ThreadUpserted   int64
@@ -17,13 +17,14 @@ type GmailBackfillJob struct {
 	NextPageToken    pgtype.Text
 	LastErrorCode    pgtype.Text
 	LastErrorMessage pgtype.Text
-	LastErrorContext pgtype.Text
+	LastErrorContext pgtype.Time
 	CancelReason     pgtype.Text
 	CreatedAt        pgtype.Timestamptz
 	AvailableAt      pgtype.Timestamptz
 	StartedAt        pgtype.Timestamptz
 	CancelledAt      pgtype.Timestamptz
 	CompletedAt      pgtype.Timestamptz
+	ClaimedBy        pgtype.Text
 }
 
 type GoogleAccount struct {

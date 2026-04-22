@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimJob = `-- name: ClaimJob :one
+UPDATE gmail_backfill_job SET
+    available_at = $1, claimed_by = $2, started_at = now()
+WHERE id = $3 RETURNING id, status, account_id, thread_upserted, message_inserted, next_page_token, last_error_code, last_error_message, last_error_context, cancel_reason, created_at, available_at, started_at, cancelled_at, completed_at, claimed_by
+`
+
+type ClaimJobParams struct {
+	AvailableAt pgtype.Timestamptz
+	ClaimedBy   pgtype.Text
+	ID          pgtype.UUID
+}
+
+func (q *Queries) ClaimJob(ctx context.Context, arg ClaimJobParams) (GmailBackfillJob, error) {
+	row := q.db.QueryRow(ctx, claimJob, arg.AvailableAt, arg.ClaimedBy, arg.ID)
+	var i GmailBackfillJob
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.AccountID,
+		&i.ThreadUpserted,
+		&i.MessageInserted,
+		&i.NextPageToken,
+		&i.LastErrorCode,
+		&i.LastErrorMessage,
+		&i.LastErrorContext,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.AvailableAt,
+		&i.StartedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.ClaimedBy,
+	)
+	return i, err
+}
+
 const completeOauthRecord = `-- name: CompleteOauthRecord :one
 UPDATE oauth_record SET completed_at = $1 WHERE id = $2 RETURNING id, provider, state, pkce_verifier, scopes, redirect_url, created_at, completed_at
 `
@@ -37,15 +73,13 @@ func (q *Queries) CompleteOauthRecord(ctx context.Context, arg CompleteOauthReco
 }
 
 const createGmailBackfillJob = `-- name: CreateGmailBackfillJob :one
-
 INSERT INTO gmail_backfill_job (
     account_id
 ) VALUES (
     $1
-) RETURNING id, status, account_id, thread_upserted, message_inserted, next_page_token, last_error_code, last_error_message, last_error_context, cancel_reason, created_at, available_at, started_at, cancelled_at, completed_at
+) RETURNING id, status, account_id, thread_upserted, message_inserted, next_page_token, last_error_code, last_error_message, last_error_context, cancel_reason, created_at, available_at, started_at, cancelled_at, completed_at, claimed_by
 `
 
-// gmail_backfill_job
 func (q *Queries) CreateGmailBackfillJob(ctx context.Context, accountID pgtype.UUID) (GmailBackfillJob, error) {
 	row := q.db.QueryRow(ctx, createGmailBackfillJob, accountID)
 	var i GmailBackfillJob
@@ -65,6 +99,7 @@ func (q *Queries) CreateGmailBackfillJob(ctx context.Context, accountID pgtype.U
 		&i.StartedAt,
 		&i.CancelledAt,
 		&i.CompletedAt,
+		&i.ClaimedBy,
 	)
 	return i, err
 }
@@ -108,7 +143,7 @@ func (q *Queries) CreateGoogleAccount(ctx context.Context, arg CreateGoogleAccou
 const createGoogleOauthAccess = `-- name: CreateGoogleOauthAccess :one
 
 INSERT INTO google_oauth_access (
-    access_token, refresh_token, access_token_expired_at, account_id 
+    access_token, refresh_token, access_token_expired_at, account_id
 ) VALUES (
     $1, $2, $3, $4
 ) RETURNING id, access_token, refresh_token, access_token_expired_at, created_at, refreshed_at, account_id
@@ -180,9 +215,131 @@ func (q *Queries) CreateOauthRecord(ctx context.Context, arg CreateOauthRecordPa
 	return i, err
 }
 
+const getAvailJobForUpdate = `-- name: GetAvailJobForUpdate :one
+SELECT id, status, account_id, thread_upserted, message_inserted, next_page_token, last_error_code, last_error_message, last_error_context, cancel_reason, created_at, available_at, started_at, cancelled_at, completed_at, claimed_by
+FROM gmail_backfill_job
+WHERE status = 'queued' OR (status = 'grabbed' AND available_at <= now())
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) GetAvailJobForUpdate(ctx context.Context) (GmailBackfillJob, error) {
+	row := q.db.QueryRow(ctx, getAvailJobForUpdate)
+	var i GmailBackfillJob
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.AccountID,
+		&i.ThreadUpserted,
+		&i.MessageInserted,
+		&i.NextPageToken,
+		&i.LastErrorCode,
+		&i.LastErrorMessage,
+		&i.LastErrorContext,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.AvailableAt,
+		&i.StartedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.ClaimedBy,
+	)
+	return i, err
+}
+
+const getGmailBackfillJobById = `-- name: GetGmailBackfillJobById :one
+
+SELECT id, status, account_id, thread_upserted, message_inserted, next_page_token, last_error_code, last_error_message, last_error_context, cancel_reason, created_at, available_at, started_at, cancelled_at, completed_at, claimed_by FROM gmail_backfill_job WHERE id = $1 LIMIT 1
+`
+
+// gmail_backfill_job
+func (q *Queries) GetGmailBackfillJobById(ctx context.Context, id pgtype.UUID) (GmailBackfillJob, error) {
+	row := q.db.QueryRow(ctx, getGmailBackfillJobById, id)
+	var i GmailBackfillJob
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.AccountID,
+		&i.ThreadUpserted,
+		&i.MessageInserted,
+		&i.NextPageToken,
+		&i.LastErrorCode,
+		&i.LastErrorMessage,
+		&i.LastErrorContext,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.AvailableAt,
+		&i.StartedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.ClaimedBy,
+	)
+	return i, err
+}
+
+const getGoogleOauthAcessByAcctId = `-- name: GetGoogleOauthAcessByAcctId :one
+SELECT id, access_token, refresh_token, access_token_expired_at, created_at, refreshed_at, account_id FROM google_oauth_access WHERE account_id = $1
+`
+
+func (q *Queries) GetGoogleOauthAcessByAcctId(ctx context.Context, accountID pgtype.UUID) (GoogleOauthAccess, error) {
+	row := q.db.QueryRow(ctx, getGoogleOauthAcessByAcctId, accountID)
+	var i GoogleOauthAccess
+	err := row.Scan(
+		&i.ID,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.AccessTokenExpiredAt,
+		&i.CreatedAt,
+		&i.RefreshedAt,
+		&i.AccountID,
+	)
+	return i, err
+}
+
+const getHeldJob = `-- name: GetHeldJob :one
+SELECT id, status, account_id, thread_upserted, message_inserted, next_page_token, last_error_code, last_error_message, last_error_context, cancel_reason, created_at, available_at, started_at, cancelled_at, completed_at, claimed_by
+FROM gmail_backfill_job
+WHERE status = 'grabbed' AND claimed_by = $1 AND id = $2
+LIMIT 1
+FOR UPDATE NOWAIT
+`
+
+type GetHeldJobParams struct {
+	ClaimedBy pgtype.Text
+	ID        pgtype.UUID
+}
+
+func (q *Queries) GetHeldJob(ctx context.Context, arg GetHeldJobParams) (GmailBackfillJob, error) {
+	row := q.db.QueryRow(ctx, getHeldJob, arg.ClaimedBy, arg.ID)
+	var i GmailBackfillJob
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.AccountID,
+		&i.ThreadUpserted,
+		&i.MessageInserted,
+		&i.NextPageToken,
+		&i.LastErrorCode,
+		&i.LastErrorMessage,
+		&i.LastErrorContext,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.AvailableAt,
+		&i.StartedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.ClaimedBy,
+	)
+	return i, err
+}
+
 const getOauthRecordByStateHash = `-- name: GetOauthRecordByStateHash :one
 
-SELECT id, provider, state, pkce_verifier, scopes, redirect_url, created_at, completed_at FROM oauth_record WHERE state = $1 AND provider = $2 AND completed_at IS NULL LIMIT 1
+SELECT id, provider, state, pkce_verifier, scopes, redirect_url, created_at, completed_at
+FROM oauth_record
+WHERE state = $1 AND provider = $2 AND completed_at IS NULL
+LIMIT 1
 `
 
 type GetOauthRecordByStateHashParams struct {
@@ -203,6 +360,42 @@ func (q *Queries) GetOauthRecordByStateHash(ctx context.Context, arg GetOauthRec
 		&i.RedirectUrl,
 		&i.CreatedAt,
 		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const holdJob = `-- name: HoldJob :one
+UPDATE gmail_backfill_job SET
+    status = 'grabbed', available_at = $1, claimed_by = $2 
+WHERE id = $3 RETURNING id, status, account_id, thread_upserted, message_inserted, next_page_token, last_error_code, last_error_message, last_error_context, cancel_reason, created_at, available_at, started_at, cancelled_at, completed_at, claimed_by
+`
+
+type HoldJobParams struct {
+	AvailableAt pgtype.Timestamptz
+	ClaimedBy   pgtype.Text
+	ID          pgtype.UUID
+}
+
+func (q *Queries) HoldJob(ctx context.Context, arg HoldJobParams) (GmailBackfillJob, error) {
+	row := q.db.QueryRow(ctx, holdJob, arg.AvailableAt, arg.ClaimedBy, arg.ID)
+	var i GmailBackfillJob
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.AccountID,
+		&i.ThreadUpserted,
+		&i.MessageInserted,
+		&i.NextPageToken,
+		&i.LastErrorCode,
+		&i.LastErrorMessage,
+		&i.LastErrorContext,
+		&i.CancelReason,
+		&i.CreatedAt,
+		&i.AvailableAt,
+		&i.StartedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.ClaimedBy,
 	)
 	return i, err
 }

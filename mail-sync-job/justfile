@@ -2,3 +2,6 @@ set dotenv-load
 
 serve:
     go run cmd/server/main.go 
+
+backfill:
+    go run cmd/backfill/main.go 
